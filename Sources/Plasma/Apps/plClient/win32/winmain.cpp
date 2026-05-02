@@ -579,10 +579,10 @@ INT_PTR CALLBACK AuthFailedDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, L
     return FALSE;
 }
 
-static const char* LoadLocalizedString(UINT nID)
+static const wchar_t* GetLocalizedString(UINT nID)
 {
-    static char buffer[256];
-    LoadStringA(gHInst, nID, buffer, sizeof(buffer));
+    wchar_t* buffer = nullptr;
+    LoadStringW(gHInst, nID, reinterpret_cast<LPWSTR>(&buffer), 0);
     return buffer;
 }
 
@@ -606,8 +606,8 @@ INT_PTR CALLBACK UruTOSDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARA
                 SetDlgItemTextW(hwndDlg, IDC_URULOGIN_EULATEXT,
                                 ST::string(eula, ST::substitute_invalid).to_wchar().data());
 
-                SetDlgItemText(hwndDlg, IDC_BUTTON_ACCEPT, LoadLocalizedString(IDC_TEXT_ACCEPT));
-                SetDlgItemText(hwndDlg, IDC_BUTTON_DECLINE, LoadLocalizedString(IDC_TEXT_DECLINE));
+                SetDlgItemTextW(hwndDlg, IDC_BUTTON_ACCEPT, GetLocalizedString(IDC_TEXT_ACCEPT));
+                SetDlgItemTextW(hwndDlg, IDC_BUTTON_DECLINE, GetLocalizedString(IDC_TEXT_DECLINE));
             }
             else // no TOS found, go ahead
                 EndDialog(hwndDlg, true);
@@ -732,7 +732,7 @@ static size_t CurlCallback(void *buffer, size_t size, size_t nmemb, void *param)
     return size * nmemb;
 }
 
-void SetWindowsUILanguage(plLocalization::Language lang)
+static void SetWindowsUILanguage(plLocalization::Language lang)
 {
     LANGID langId;
 
@@ -926,7 +926,7 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
             else if (HIWORD(wParam) == CBN_SELCHANGE && LOWORD(wParam) == IDC_LANGUAGE) 
             {
                 HWND hCombo = (HWND)lParam;
-                int  currentIndex = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+                int currentIndex = ComboBox_GetCurSel(hCombo);
 
                 if (currentIndex != CB_ERR) {
                     plLocalization::Language new_language = (plLocalization::Language)SendMessage(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_GETCURSEL, 0, 0L);
