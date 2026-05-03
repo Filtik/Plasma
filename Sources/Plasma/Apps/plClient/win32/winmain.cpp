@@ -926,7 +926,7 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
             else if (HIWORD(wParam) == CBN_SELCHANGE && LOWORD(wParam) == IDC_LANGUAGE) 
             {
                 HWND hCombo = (HWND)lParam;
-                int currentIndex = ComboBox_GetCurSel(hCombo);
+                int currentIndex = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
 
                 if (currentIndex != CB_ERR) {
                     plLocalization::Language new_language = (plLocalization::Language)SendMessage(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_GETCURSEL, 0, 0L);
