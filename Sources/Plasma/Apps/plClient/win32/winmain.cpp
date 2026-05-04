@@ -84,6 +84,7 @@ You can contact Cyan Worlds, Inc. by email legal@cyan.com
 #include "pfConsoleCore/pfConsoleEngine.h"
 #include "pfConsoleCore/pfServerIni.h"
 #include "pfCrashHandler/plCrashCli.h"
+#include "pfDisplayHelpers/plWinDisplayHelper.h"
 #include "pfPasswordStore/pfPasswordStore.h"
 
 //
@@ -185,7 +186,7 @@ void DebugMsgF(const char* format, ...);
 static void HandleDpiChange(HWND hWnd, UINT dpi, float scale, const RECT& rect)
 {
     // Inform the engine about the new DPI.
-    auto* msg = new plDisplayScaleChangedMsg(scale, plDisplayScaleChangedMsg::ConvertRect(rect));
+    auto* msg = new plDisplayScaleChangedMsg(scale, plWinDpi::ConvertRect(rect));
     msg->Send();
 }
 
@@ -581,9 +582,42 @@ INT_PTR CALLBACK AuthFailedDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, L
 
 static const wchar_t* GetLocalizedString(UINT nID)
 {
-    wchar_t* buffer = nullptr;
-    LoadStringW(gHInst, nID, reinterpret_cast<LPWSTR>(&buffer), 0);
+    static wchar_t buffer[256];
+    LoadStringW(gHInst, nID, buffer, static_cast<int>(std::size(buffer)));
     return buffer;
+}
+
+static void SetWindowsUILanguage(plLocalization::Language lang)
+{
+    LANGID langId;
+
+    switch (lang) {
+        case plLocalization::kGerman:
+            langId = MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN);
+            break;
+
+        default:
+            langId = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
+            break;
+    }
+
+    SetThreadUILanguage(langId);
+}
+
+static void ApplyLoginDialogLanguage(HWND hwndDlg, plLocalization::Language lang)
+{
+    static const struct { UINT ctrl; UINT str; } kControls[] = {
+        { IDC_BUTTON_LOGIN,          IDC_TEXT_LOGIN },
+        { IDC_BUTTON_CANCEL,         IDC_TEXT_QUIT },
+        { IDC_STATIC_ACCOUNT,        IDC_TEXT_ACCOUNT },
+        { IDC_STATIC_PASSWORD,       IDC_TEXT_PASSWORD },
+        { IDC_STATIC_LANGUAGE,       IDC_TEXT_LANGUAGE },
+        { IDC_URULOGIN_REMEMBERPASS, IDC_TEXT_REMEMBER_PASS },
+        { IDC_URULOGIN_NEWACCTLINK,  IDC_TEXT_NEED_ACCOUNT },
+    };
+    SetWindowsUILanguage(lang);
+    for (auto [ctrl, str] : kControls)
+        SetDlgItemTextW(hwndDlg, ctrl, GetLocalizedString(str));
 }
 
 INT_PTR CALLBACK UruTOSDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam )
@@ -732,23 +766,6 @@ static size_t CurlCallback(void *buffer, size_t size, size_t nmemb, void *param)
     return size * nmemb;
 }
 
-static void SetWindowsUILanguage(plLocalization::Language lang)
-{
-    LANGID langId;
-
-    switch (lang) {
-        case plLocalization::kGerman:
-            langId = MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN);
-            break;
-
-        default:
-            langId = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
-            break;
-    }
-
-    SetThreadUILanguage(langId);
-}
-
 INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam )
 {
     static LoginDialogParam* pLoginParam;
@@ -825,6 +842,8 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
                 SendMessageW(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_ADDSTRING, 0, (LPARAM)langName.to_wchar().c_str());
             }
             SendMessage(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_SETCURSEL, (WPARAM)plLocalization::GetLanguage(), 0);
+
+            ApplyLoginDialogLanguage(hwndDlg, plLocalization::GetLanguage());
 
             EnableWindow(GetDlgItem(hwndDlg, IDC_URULOGIN_NEWACCTLINK), !GetServerSignupUrl().empty());
 
@@ -923,14 +942,15 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
 
                 return TRUE;
             }
-            else if (HIWORD(wParam) == CBN_SELCHANGE && LOWORD(wParam) == IDC_LANGUAGE) 
+            else if (HIWORD(wParam) == CBN_SELCHANGE && LOWORD(wParam) == IDC_LANGUAGE)
             {
                 HWND hCombo = (HWND)lParam;
                 int currentIndex = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
 
                 if (currentIndex != CB_ERR) {
                     plLocalization::Language new_language = (plLocalization::Language)SendMessage(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_GETCURSEL, 0, 0L);
-                    SetWindowsUILanguage(new_language);
+                    plLocalization::SetLanguage(new_language);
+                    ApplyLoginDialogLanguage(hwndDlg, new_language);
                 }
             }
             break;
@@ -1029,19 +1049,17 @@ uint32_t ParseRendererArgument(const ST::string& requested)
 {
     using namespace ST::literals;
 
-    static std::unordered_set<ST::string, ST::hash_i, ST::equal_i> dx_args {
-        "directx"_st, "direct3d"_st, "dx"_st, "d3d"_st
-    };
+    static std::unordered_map<ST::string, uint32_t, ST::hash_i, ST::equal_i> args{
+        {"directx"_st, hsG3DDeviceSelector::kDevTypeDirect3D},
+        {"direct3d"_st, hsG3DDeviceSelector::kDevTypeDirect3D},
+        {"dx"_st, hsG3DDeviceSelector::kDevTypeDirect3D},
+        {"d3d"_st, hsG3DDeviceSelector::kDevTypeDirect3D},
+        {"opengl"_st, hsG3DDeviceSelector::kDevTypeOpenGL},
+        {"gl"_st, hsG3DDeviceSelector::kDevTypeOpenGL}};
 
-    static std::unordered_set<ST::string, ST::hash_i, ST::equal_i> gl_args {
-        "opengl"_st, "gl"_st
-    };
-
-    if (dx_args.find(requested) != dx_args.end())
-        return hsG3DDeviceSelector::kDevTypeDirect3D;
-
-    if (gl_args.find(requested) != gl_args.end())
-        return hsG3DDeviceSelector::kDevTypeOpenGL;
+    auto it = args.find(requested);
+    if (it != args.end())
+        return it->second;
 
     return hsG3DDeviceSelector::kDevTypeUnknown;
 }
@@ -1085,6 +1103,8 @@ bool WinInit(HINSTANCE hInst)
         nullptr, nullptr, hInst, nullptr
         );
     HDC hDC = GetDC(hWnd);
+
+    plDisplayHelper::SetInstance(new plWinDisplayHelper());
 
     gClient.SetClientWindow((hsWindowHndl)hWnd);
     gClient.SetClientDisplay((hsWindowHndl)hDC);
@@ -1326,7 +1346,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR lpCmdLine, int 
         if (gPendingActivate)
             gClient->WindowActivate(gPendingActivateFlag);
         gClient->SetMessagePumpProc(PumpMessageQueueProc);
-        gClient.Start();
+        gClient.StartClient();
 
         // PhysX installs its own exception handler somewhere in PhysXCore.dll. Unfortunately, this code appears to suck
         // the big one. It actually makes us unable to attach with the Visual Studio debugger! We're going to override that
